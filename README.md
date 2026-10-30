@@ -29,13 +29,13 @@
 
 **Lives in the menu bar.** Shows the average of every temperature sensor, the hottest one, the chip, power draw or fan speed. Your choice. The thermometer fills as the Mac warms up.
 
-**See what's heating your Mac.** heam measures each app's CPU energy and splits the degrees above your Mac's idle temperature between them. Helper processes count toward their app, so Safari's web pages show up as Safari and Chrome helpers as Chrome.
+**See what's heating your Mac.** heam measures each app's CPU *and* GPU energy and splits the degrees above your Mac's idle temperature between them, so games and video apps get the blame they deserve. Helper processes count toward their app, so Safari's web pages show up as Safari and Chrome helpers as Chrome.
 
 **Today view.** Which apps added the most heat over the day, with the day's peak temperatures and energy used.
 
 **Every sensor, grouped.** 40+ sensors on Apple Silicon, bucketed into Chip, Board, SSD and Battery. Click a tile for the full list.
 
-**Real power draw.** Whole-system watts from the SMC, and per-app watts from the kernel's energy counters.
+**Real power draw.** Whole-system watts from the SMC, and per-app watts from the kernel's CPU energy counters plus each app's slice of GPU energy.
 
 **Fan control.** Auto, a temperature **curve** (fans ramp between two temperatures you pick, and macOS takes over below the ramp), or **manual** RPM with Quiet, Balanced and Max presets.
 
@@ -53,9 +53,12 @@
 
 ## Install
 
-1. Download **heam.zip** from the [latest release](../../releases/latest) and unzip it.
-2. Drag **heam.app** to your **Applications** folder.
-3. The first time, **right-click heam.app → Open**, then confirm. heam isn't notarized by Apple yet, so macOS asks once.
+1. Download the **.dmg** from the [latest release](../../releases/latest) and open it.
+2. Drag **heam** onto **Applications**.
+
+   <img src="docs/installer.jpg" width="440" alt="The heam installer window: drag heam onto the Applications folder">
+
+3. The first time, **right-click heam in Applications → Open**, then confirm. heam isn't notarized by Apple yet, so macOS asks once.
 
    If macOS still refuses, run this once and open it again:
    ```bash
@@ -81,10 +84,10 @@ heam appears in the menu bar. To start it with your Mac, open the gear menu and 
 macOS doesn't track temperature per app, so heam estimates it:
 
 1. It remembers the coolest your Mac gets (its **idle** temperature). That slowly drifts up if the Mac never gets that cool again.
-2. Every 2 seconds it measures each app's share of CPU energy.
-3. The degrees above idle are split between apps by that share.
+2. Every 2 seconds it measures each app's energy: CPU energy straight from the kernel, plus a slice of the GPU's energy matching the app's share of GPU time.
+3. The degrees above idle are split between apps by their share of that energy.
 
-So if idle is 38°, the Mac is at 48°, and Minecraft uses 60% of CPU energy, Minecraft shows **+6°**. Treat it as "who is responsible for the heat right now", not a lab measurement.
+So if idle is 38°, the Mac is at 48°, and Minecraft uses 60% of all CPU and GPU energy, Minecraft shows **+6°** with a **GPU** tag when most of it comes from the GPU. *Screen drawing* is macOS itself compositing every window. Treat the numbers as "who is responsible for the heat right now", not a lab measurement.
 
 ### Fan control and safety
 
@@ -118,9 +121,11 @@ Other useful commands:
 
 ```bash
 ./build.sh                                    # build into ./build/heam.app only
+./build.sh --dmg                              # also package build/heam-<version>.dmg (needs dmgbuild, see build.sh)
 .build/debug/heam --dump                      # print sensors, fans and top processes, then exit
 .build/debug/heam --snapshot /tmp/heam        # render the popover to PNGs
 swift scripts/make-icon.swift Resources/AppIcon.icns   # regenerate the app icon
+swift scripts/make-dmg-background.swift Resources/dmg-background.tiff   # regenerate the installer background
 ```
 
 ### Project layout
@@ -138,4 +143,4 @@ swift scripts/make-icon.swift Resources/AppIcon.icns   # regenerate the app icon
 - **Apple Silicon only.** Intel Macs expose temperatures differently and aren't supported yet.
 - **Not notarized.** Signed locally, so macOS asks before the first launch.
 - **Widget refresh.** macOS limits how often widgets update, so the widget can lag a few minutes behind the menu bar.
-- **Per-app heat is an estimate** (see above).
+- **Per-app heat is an estimate** (see above). GPU time is only reported when a batch of GPU work finishes, so apps that submit very long GPU jobs (some ML training) show up late; games and video are fine.

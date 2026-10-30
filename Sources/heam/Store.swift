@@ -38,6 +38,8 @@ struct AppImpact: Identifiable {
     /// Degrees above the idle baseline attributed to this app.
     let degrees: Double
     let watts: Double?
+    /// Share of this app's energy that went to the GPU (0...1).
+    var gpuFraction: Double = 0
     var id: String { name }
 }
 
@@ -97,7 +99,7 @@ final class Store: ObservableObject {
     private let monitor = ProcessMonitor()
     private let queue = DispatchQueue(label: "heam.sample", qos: .utility)
     /// Smoothed per-app values so the list doesn't jitter between 2 s samples.
-    private var smoothed: [String: (bundle: String?, share: Double, watts: Double?)] = [:]
+    private var smoothed: [String: (bundle: String?, share: Double, watts: Double?, gpu: Double)] = [:]
     private var smoothedChip: Double?
     private var timer: Timer?
     private var ticks = 0
@@ -215,20 +217,22 @@ final class Store: ObservableObject {
 
         let headroom = max(0, modelTemp - baseline)
         let fresh = Dictionary(shares.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
-        var next: [String: (bundle: String?, share: Double, watts: Double?)] = [:]
+        var next: [String: (bundle: String?, share: Double, watts: Double?, gpu: Double)] = [:]
         for name in Set(fresh.keys).union(smoothed.keys) {
             let old = smoothed[name], new = fresh[name]
             let share = (old?.share ?? 0) * 0.6 + (new?.share ?? 0) * 0.4
             let w: Double? = (old?.watts == nil && new?.watts == nil) ? nil
                 : (old?.watts ?? 0) * 0.6 + (new?.watts ?? 0) * 0.4
-            if share > 0.002 { next[name] = (new?.bundlePath ?? old?.bundle, share, w) }
+            let gpu = (old?.gpu ?? 0) * 0.6 + (new?.gpuFraction ?? 0) * 0.4
+            if share > 0.002 { next[name] = (new?.bundlePath ?? old?.bundle, share, w, gpu) }
         }
         smoothed = next
         impacts = next
             .sorted { $0.value.share > $1.value.share }
             .prefix(6)
             .map { AppImpact(name: $0.key, bundlePath: $0.value.bundle, share: $0.value.share,
-                             degrees: $0.value.share * headroom, watts: $0.value.watts) }
+                             degrees: $0.value.share * headroom, watts: $0.value.watts,
+                             gpuFraction: $0.value.gpu) }
 
         today.record(impacts: impacts, systemWatts: systemWatts, temp: temp, chip: chip, seconds: Self.interval)
         if ticks % 15 == 0 { today.save() }
@@ -278,7 +282,8 @@ final class Store: ObservableObject {
             ("Finder", "/System/Library/CoreServices/Finder.app", 0.2, 0.2),
         ]
         impacts = demo.map { name, path, degrees, watts in
-            AppImpact(name: name, bundlePath: path, share: degrees / headroom, degrees: degrees, watts: watts)
+            AppImpact(name: name, bundlePath: path, share: degrees / headroom, degrees: degrees, watts: watts,
+                      gpuFraction: ["Photos": 0.72, "Safari": 0.24, "Music": 0.05][name] ?? 0)
         }
         var day = DailyHistory(day: DailyHistory.today())
         day.trackedSeconds = 6 * 3600

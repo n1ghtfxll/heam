@@ -1,6 +1,7 @@
 #include "CHeam.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
+#include <dlfcn.h>
 #include <string.h>
 
 // MARK: - HID temperature sensors (private API, declared here)
@@ -152,4 +153,76 @@ extern pid_t responsibility_get_pid_responsible_for_pid(pid_t pid);
 pid_t heam_responsible_pid(pid_t pid) {
     pid_t r = responsibility_get_pid_responsible_for_pid(pid);
     return r > 0 ? r : pid;
+}
+
+// MARK: - GPU energy (private IOReport API, loaded at runtime)
+
+typedef CFDictionaryRef (*IORCopyChannels)(CFStringRef, CFStringRef, uint64_t, uint64_t, uint64_t);
+typedef void *(*IORCreateSubscription)(void *, CFMutableDictionaryRef, CFMutableDictionaryRef *, uint64_t, CFTypeRef);
+typedef CFDictionaryRef (*IORCreateSamples)(void *, CFMutableDictionaryRef, CFTypeRef);
+typedef CFDictionaryRef (*IORCreateDelta)(CFDictionaryRef, CFDictionaryRef, CFTypeRef);
+typedef int64_t (*IORIntegerValue)(CFDictionaryRef, int32_t);
+typedef CFStringRef (*IORChannelString)(CFDictionaryRef);
+
+int64_t heam_gpu_energy_nj(void) {
+    static int ready = -1; // -1 untried, 0 unavailable, 1 ready
+    static void *subscription;
+    static CFMutableDictionaryRef channels;
+    static CFDictionaryRef previous;
+    static IORCreateSamples createSamples;
+    static IORCreateDelta createDelta;
+    static IORIntegerValue integerValue;
+    static IORChannelString channelName, unitLabel;
+
+    if (ready == -1) {
+        ready = 0;
+        void *lib = dlopen("/usr/lib/libIOReport.dylib", RTLD_NOW);
+        if (!lib) return -1;
+        IORCopyChannels copyChannels = (IORCopyChannels)dlsym(lib, "IOReportCopyChannelsInGroup");
+        IORCreateSubscription createSubscription = (IORCreateSubscription)dlsym(lib, "IOReportCreateSubscription");
+        createSamples = (IORCreateSamples)dlsym(lib, "IOReportCreateSamples");
+        createDelta = (IORCreateDelta)dlsym(lib, "IOReportCreateSamplesDelta");
+        integerValue = (IORIntegerValue)dlsym(lib, "IOReportSimpleGetIntegerValue");
+        channelName = (IORChannelString)dlsym(lib, "IOReportChannelGetChannelName");
+        unitLabel = (IORChannelString)dlsym(lib, "IOReportChannelGetUnitLabel");
+        if (!copyChannels || !createSubscription || !createSamples || !createDelta ||
+            !integerValue || !channelName || !unitLabel) return -1;
+
+        CFDictionaryRef group = copyChannels(CFSTR("Energy Model"), NULL, 0, 0, 0);
+        if (!group) return -1;
+        CFMutableDictionaryRef wanted = CFDictionaryCreateMutableCopy(NULL, 0, group);
+        CFRelease(group);
+        subscription = createSubscription(NULL, wanted, &channels, 0, NULL);
+        CFRelease(wanted);
+        if (!subscription || !channels) return -1;
+        ready = 1;
+    }
+    if (ready != 1) return -1;
+
+    CFDictionaryRef now = createSamples(subscription, channels, NULL);
+    if (!now) return -1;
+    if (!previous) { previous = now; return 0; }
+    CFDictionaryRef delta = createDelta(previous, now, NULL);
+    CFRelease(previous);
+    previous = now;
+    if (!delta) return -1;
+
+    // Prefer the fine-grained "GPU Energy" (nJ) channel; fall back to coarser "GPU" readings.
+    int64_t fine = -1, coarse = -1;
+    CFArrayRef list = (CFArrayRef)CFDictionaryGetValue(delta, CFSTR("IOReportChannels"));
+    for (CFIndex i = 0; list && i < CFArrayGetCount(list); i++) {
+        CFDictionaryRef ch = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+        CFStringRef name = channelName(ch);
+        if (!name) continue;
+        char unit[16] = {0};
+        CFStringRef u = unitLabel(ch);
+        if (u) CFStringGetCString(u, unit, sizeof unit, kCFStringEncodingUTF8);
+        int64_t scale = strcmp(unit, "nJ") == 0 ? 1 : strcmp(unit, "uJ") == 0 ? 1000 : strcmp(unit, "mJ") == 0 ? 1000000 : 0;
+        if (!scale) continue;
+        int64_t v = integerValue(ch, 0) * scale;
+        if (CFStringCompare(name, CFSTR("GPU Energy"), 0) == kCFCompareEqualTo) fine = v;
+        else if (CFStringCompare(name, CFSTR("GPU"), 0) == kCFCompareEqualTo) coarse = v;
+    }
+    CFRelease(delta);
+    return fine >= 0 ? fine : coarse;
 }

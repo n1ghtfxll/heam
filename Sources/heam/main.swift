@@ -8,10 +8,21 @@ if let i = args.firstIndex(of: "--fan-daemon") {
     // Debug aid: print what the app sees, then exit.
     for s in Sensors.read() { print(String(format: "%6.1f°  %@", s.celsius, s.name)) }
     for f in Fans.read() { print("\(f.name): \(Int(f.rpm)) rpm (\(Int(f.minRPM))–\(Int(f.maxRPM)))") }
+    let g1 = GPUUsage.timeByPID()
+    sleep(2)
+    let g2 = GPUUsage.timeByPID()
+    for (pid, t) in g2.sorted(by: { ($0.value &- (g1[$0.key] ?? $0.value)) > ($1.value &- (g1[$1.key] ?? $1.value)) }).prefix(6) {
+        guard let old = g1[pid], t > old else { continue }
+        var name = [CChar](repeating: 0, count: 256)
+        proc_name(pid, &name, 256)
+        print(String(format: "GPU busy %5.1f%%  %@ (%d)", Double(t - old) / 2e7, String(cString: name), pid))
+    }
     let monitor = ProcessMonitor()
     _ = monitor.sample()
     sleep(2)
-    for a in monitor.sample().prefix(10) { print(String(format: "%5.1f%%  %@", a.share * 100, a.name)) }
+    for a in monitor.sample().prefix(10) {
+        print(String(format: "%5.1f%%  %5.2f W  %3.0f%% GPU  %@", a.share * 100, a.watts ?? 0, a.gpuFraction * 100, a.name))
+    }
 } else if let i = args.firstIndex(of: "--snapshot"), args.indices.contains(i + 1) {
     // Dev aid: render the popover to a PNG after a few seconds of live data.
     MainActor.assumeIsolated {

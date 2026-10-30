@@ -359,7 +359,7 @@ struct ImpactModule: View {
                 ForEach(0..<Self.slots, id: \.self) { i in
                     if let row = rows[safe: i] {
                         ImpactRow(name: row.name, bundlePath: row.bundlePath, relative: row.relative,
-                                  value: row.value, detail: row.detail)
+                                  value: row.value, detail: row.detail, gpuHeavy: row.gpuHeavy)
                     } else {
                         Color.clear.frame(height: ImpactRow.height)
                     }
@@ -376,13 +376,14 @@ struct ImpactModule: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .help(span == .now
-                      ? "Idle is the coolest this Mac has been recently. Degrees above it are split between apps by their share of CPU energy."
+                      ? "Idle is the coolest this Mac has been recently. Degrees above it are split between apps by their share of CPU and GPU energy."
                       : "Degrees each app added, averaged over everything measured today. Hover a row for its peak.")
         }
     }
 
     private struct Row {
         let name: String, bundlePath: String?, relative: Double, value: String, detail: String
+        var gpuHeavy = false
     }
 
     private var rows: [Row] {
@@ -393,7 +394,9 @@ struct ImpactModule: View {
                 Row(name: app.name, bundlePath: app.bundlePath, relative: app.degrees / top,
                     value: store.formatDelta(app.degrees),
                     detail: [app.watts.map { store.formatWatts($0) },
-                             String(format: "%.0f%% of CPU", app.share * 100)].compactMap { $0 }.joined(separator: ", "))
+                             app.gpuFraction >= 0.05 ? String(format: "%.0f%% GPU", app.gpuFraction * 100) : nil,
+                             String(format: "%.0f%% of energy", app.share * 100)].compactMap { $0 }.joined(separator: ", "),
+                    gpuHeavy: app.gpuFraction >= 0.5)
             }
         case .today:
             let ranked = store.today.ranked.prefix(Self.slots)
@@ -411,7 +414,7 @@ struct ImpactModule: View {
     private var footnote: String {
         switch span {
         case .now:
-            "Degrees above idle (\(store.format(store.baseline))), split by CPU energy"
+            "Degrees above idle (\(store.format(store.baseline))), split by CPU and GPU energy"
         case .today:
             "Peak \(store.format(store.today.peakTemp)), chip \(store.format(store.today.peakChip)), \(store.formatEnergy(store.today.systemJoules)) used"
         }
@@ -442,6 +445,8 @@ struct ImpactRow: View {
     let value: String
     /// Shown in place of `value` on hover.
     let detail: String
+    /// Most of this app's heat comes from the GPU (games, video, 3D).
+    var gpuHeavy = false
     @State private var hovering = false
 
     var body: some View {
@@ -450,6 +455,15 @@ struct ImpactRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(name).font(.system(size: 13)).lineLimit(1)
+                    if gpuHeavy {
+                        Text("GPU")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.primary.opacity(0.08), in: .rect(cornerRadius: 3, style: .continuous))
+                            .help("Most of this app's heat comes from the GPU")
+                    }
                     Spacer()
                     Text(hovering ? detail : value)
                         .font(.system(size: 12, weight: .medium).monospacedDigit())

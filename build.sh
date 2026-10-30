@@ -1,6 +1,9 @@
 #!/bin/sh
 # Builds heam.app (with its widget) into ./build.
-# Usage: ./build.sh [--open | --install]   --install copies it to /Applications and opens it.
+# Usage: ./build.sh [--open | --install | --dmg]
+#   --install  copies it to /Applications and opens it
+#   --dmg      also packages build/heam-<version>.dmg with the styled installer window
+#              (needs dmgbuild: python3 -m venv .venv-dmg && .venv-dmg/bin/pip install dmgbuild)
 set -e
 cd "$(dirname "$0")"
 swift build -c release
@@ -26,5 +29,11 @@ case "$1" in
     cp -R "$APP" /Applications/heam.app
     open /Applications/heam.app
     echo "Installed /Applications/heam.app" ;;
+  --dmg)
+    VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Info.plist)
+    DMG="build/heam-$VERSION.dmg"
+    rm -f "$DMG"
+    .venv-dmg/bin/dmgbuild -s scripts/dmg-settings.py -D app="$APP" "heam" "$DMG"
+    echo "Packaged $DMG" ;;
 esac
 exit 0

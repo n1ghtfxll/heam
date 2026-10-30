@@ -18,4 +18,9 @@ int heam_smc_write(const char *key, const uint8_t *bytes, uint32_t size);
 /// The app macOS holds responsible for a process (XPC services, helpers). Same source as Activity Monitor.
 pid_t heam_responsible_pid(pid_t pid);
 
+/// GPU energy used since the previous call, in nanojoules, from the IOReport "Energy Model"
+/// group (the source powermetrics uses). The first call primes the counter and returns 0.
+/// Returns -1 when the counters are unavailable.
+int64_t heam_gpu_energy_nj(void);
+
 #endif

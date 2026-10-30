@@ -5,16 +5,22 @@ import Darwin
 struct AppShare {
     let name: String
     let bundlePath: String?
-    /// Fraction of all CPU energy (or CPU time) spent since the previous sample.
+    /// Fraction of all CPU and GPU energy (or CPU time) spent since the previous sample.
     let share: Double
-    /// CPU power in watts, when the kernel reports per-process energy.
+    /// CPU plus GPU power in watts, when the kernel reports per-process energy.
     let watts: Double?
+    /// How much of this app's energy went to the GPU (0...1).
+    let gpuFraction: Double
 }
 
-/// Samples per-process CPU energy and groups helpers/child processes under their app.
+/// Samples per-process CPU and GPU energy and groups helpers/child processes under their app.
+///
+/// CPU energy comes per process from the kernel. GPU energy only exists as a system total, so it's
+/// split between processes by their share of GPU time. Both are joules, so they add up directly.
 final class ProcessMonitor: @unchecked Sendable {
     private struct Usage { let energy: UInt64; let cpu: UInt64 }
     private var previous: [pid_t: Usage] = [:]
+    private var previousGPU: [pid_t: UInt64] = [:]
     private var labels: [pid_t: (name: String, bundle: String?)] = [:]
     private var lastSample: Date?
 
@@ -42,30 +48,58 @@ final class ProcessMonitor: @unchecked Sendable {
             }
         }
         previous = current
+
+        // GPU: this interval's GPU time per pid, and the GPU energy to share out by it.
+        let gpuNow = GPUUsage.timeByPID()
+        var gpuDeltas: [pid_t: Double] = [:]
+        for (pid, time) in gpuNow {
+            // A client closing makes the per-pid sum drop; count that interval as zero.
+            if let old = previousGPU[pid], time > old { gpuDeltas[pid] = Double(time - old) }
+        }
+        previousGPU = gpuNow
+        let gpuTimeTotal = gpuDeltas.values.reduce(0, +)
+        let gpuEnergy = Double(max(0, heam_gpu_energy_nj()))
+
         let now = Date()
         let elapsed = lastSample.map { now.timeIntervalSince($0) } ?? 0
         lastSample = now
         labels = labels.filter { current[$0.key] != nil }
 
-        // Prefer energy (accounts for P- vs E-cores); fall back to CPU time.
-        let totalEnergy = deltas.reduce(0) { $0 + Double($1.energy) }
-        let useEnergy = totalEnergy > 0
-        let total = useEnergy ? totalEnergy : deltas.reduce(0) { $0 + Double($1.cpu) }
-        guard total > 0 else { return [] }
+        // Prefer energy (accounts for P- vs E-cores, and lets GPU energy join in); fall back to CPU time.
+        let useEnergy = deltas.contains { $0.energy > 0 }
+        let gpuShareable = useEnergy && gpuTimeTotal > 0 && gpuEnergy > 0
 
-        var grouped: [String: (bundle: String?, cost: Double)] = [:]
-        for d in deltas {
-            let cost = Double(useEnergy ? d.energy : d.cpu)
-            guard cost > 0 else { continue }
-            let label = label(for: d.pid)
-            grouped[label.name, default: (label.bundle, 0)].cost += cost
+        // Processes whose CPU stats we can't read (WindowServer, other users') still show up by GPU.
+        if gpuShareable {
+            let seen = Set(deltas.map(\.pid))
+            for pid in gpuDeltas.keys where !seen.contains(pid) { deltas.append((pid, 0, 0)) }
         }
+
+        var grouped: [String: (bundle: String?, cpu: Double, gpu: Double)] = [:]
+        for d in deltas {
+            let cpu = Double(useEnergy ? d.energy : d.cpu)
+            let gpu = gpuShareable ? gpuEnergy * (gpuDeltas[d.pid] ?? 0) / gpuTimeTotal : 0
+            guard cpu + gpu > 0 else { continue }
+            let label = label(for: d.pid)
+            grouped[label.name, default: (label.bundle, 0, 0)].cpu += cpu
+            grouped[label.name]!.gpu += gpu
+        }
+        let total = grouped.values.reduce(0) { $0 + $1.cpu + $1.gpu }
+        guard total > 0 else { return [] }
         return grouped
             .map {
-                AppShare(name: $0.key, bundlePath: $0.value.bundle, share: $0.value.cost / total,
-                         watts: useEnergy && elapsed > 0 ? $0.value.cost / 1e9 / elapsed : nil)
+                let cost = $0.value.cpu + $0.value.gpu
+                return AppShare(name: $0.key, bundlePath: $0.value.bundle, share: cost / total,
+                                watts: useEnergy && elapsed > 0 ? cost / 1e9 / elapsed : nil,
+                                gpuFraction: $0.value.gpu / cost)
             }
             .sorted { $0.share > $1.share }
+    }
+
+    private func procPath(_ pid: pid_t) -> String {
+        var buf = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        proc_pidpath(pid, &buf, UInt32(buf.count))
+        return String(cString: buf)
     }
 
     private func label(for pid: pid_t) -> (name: String, bundle: String?) {
@@ -80,10 +114,11 @@ final class ProcessMonitor: @unchecked Sendable {
         }
         if pid == 0 {
             result = ("kernel_task", nil)
+        } else if procPath(pid).hasSuffix("/WindowServer") {
+            // macOS's compositor: its GPU work is drawing every app's windows to the screen.
+            result = ("Screen drawing", nil)
         } else {
-            var pathBuf = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
-            proc_pidpath(pid, &pathBuf, UInt32(pathBuf.count))
-            let path = String(cString: pathBuf)
+            let path = procPath(pid)
             if let range = path.range(of: ".app/") {
                 // Outermost .app bundle, so "Google Chrome Helper" counts as Google Chrome.
                 let bundle = String(path[..<range.lowerBound]) + ".app"
