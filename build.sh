@@ -11,13 +11,20 @@ BIN="$(swift build -c release --show-bin-path)"
 APP=build/heam.app
 WIDGET="$APP/Contents/PlugIns/HeamWidget.appex"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$WIDGET/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks" "$WIDGET/Contents/MacOS"
+# ditto keeps the framework's symlinks intact, which its code signature depends on.
+ditto "$BIN/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 cp "$BIN/heam" "$APP/Contents/MacOS/heam"
 cp Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp LICENSE "$APP/Contents/Resources/LICENSE.txt"
+# Sparkle's license asks for its notice to ship with the app.
+cp .build/artifacts/sparkle/Sparkle/LICENSE "$APP/Contents/Resources/Sparkle-LICENSE.txt"
 cp "$BIN/HeamWidget" "$WIDGET/Contents/MacOS/HeamWidget"
 cp Resources/HeamWidget-Info.plist "$WIDGET/Contents/Info.plist"
-# Sign inside-out: the extension first (sandboxed), then the app around it.
+# Sign inside-out: Sparkle (with its helper apps and XPC services), the extension (sandboxed),
+# then the app around them.
+codesign --force --deep --sign - "$APP/Contents/Frameworks/Sparkle.framework"
 codesign --force --sign - --entitlements Resources/HeamWidget.entitlements "$WIDGET"
 codesign --force --sign - "$APP"
 echo "Built $APP"

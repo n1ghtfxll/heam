@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Your Mac's temperature in the menu bar, and which apps are heating it up.</strong><br>
-  Live sensors, per-app heat, power draw, fan curves and alerts. Native, tiny, no network.
+  Live sensors, per-app heat, power draw, fan curves and alerts. Native, tiny and private.
 </p>
 
 <p align="center">
@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/macOS-15%2B-555" alt="macOS 15 or later">
   <img src="https://img.shields.io/badge/Apple%20Silicon-native-555" alt="Apple Silicon native">
   <img src="https://img.shields.io/badge/Swift-SwiftUI-f05138" alt="Built with Swift and SwiftUI">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555" alt="MIT license"></a>
 </p>
 
 <p align="center">
@@ -45,6 +46,8 @@
 
 **Widget.** Temperature, power and the top heat sources on your desktop or in Notification Center.
 
+**Updates itself.** heam checks for new versions once a day and installs them in a click, using [Sparkle](https://sparkle-project.org). Every update is signed, and heam refuses any update whose signature doesn't match.
+
 **Light on resources.** About 1–2% CPU and 20–40 MB of memory with the popover closed.
 
 <p align="center">
@@ -56,7 +59,7 @@
 1. Download the **.dmg** from the [latest release](../../releases/latest) and open it.
 2. Drag **heam** onto **Applications**.
 
-   <img src="docs/installer.jpg" width="440" alt="The heam installer window: drag heam onto the Applications folder">
+   <img src="docs/installer.png" width="440" alt="The heam installer window: drag heam onto the Applications folder">
 
 3. The first time, **right-click heam in Applications → Open**, then confirm. heam isn't notarized by Apple yet, so macOS asks once.
 
@@ -66,6 +69,8 @@
    ```
 
 heam appears in the menu bar. To start it with your Mac, open the gear menu and turn on **Open at Login**.
+
+**Updating:** heam checks for updates daily. To check now, open the gear menu → **Check for Updates…**. Versions before 0.5.0 don't have the updater, so install 0.5.0 once by hand.
 
 **Requirements:** an Apple Silicon Mac (M1 or later) on macOS 15 Sequoia or later.
 
@@ -102,7 +107,7 @@ Don't run another fan app (Macs Fan Control, TG Pro and so on) at the same time.
 
 ## Privacy
 
-heam makes **no network connections**. Everything stays on your Mac:
+heam's only network connection is the daily update check: it downloads the release list from GitHub. Turn it off in the gear menu (**Check for Updates Automatically**). Nothing about your Mac is sent. Everything else stays on your Mac:
 
 - Settings: `~/Library/Preferences/is.bored.heam.plist`
 - Today's history and the widget's data: `~/Library/Application Support/heam/`
@@ -126,6 +131,7 @@ Other useful commands:
 .build/debug/heam --snapshot /tmp/heam        # render the popover to PNGs
 swift scripts/make-icon.swift Resources/AppIcon.icns   # regenerate the app icon
 swift scripts/make-dmg-background.swift Resources/dmg-background.tiff   # regenerate the installer background
+scripts/release.sh notes.md                   # bump the version in Info.plist first; publishes DMG + update feed
 ```
 
 ### Project layout
@@ -144,3 +150,7 @@ swift scripts/make-dmg-background.swift Resources/dmg-background.tiff   # regene
 - **Not notarized.** Signed locally, so macOS asks before the first launch.
 - **Widget refresh.** macOS limits how often widgets update, so the widget can lag a few minutes behind the menu bar.
 - **Per-app heat is an estimate** (see above). GPU time is only reported when a batch of GPU work finishes, so apps that submit very long GPU jobs (some ML training) show up late; games and video are fine.
+
+## License
+
+heam is released under the [MIT License](LICENSE). It includes [Sparkle](https://github.com/sparkle-project/Sparkle) for updates, under Sparkle's own license, which ships inside the app.

@@ -810,6 +810,10 @@ struct Footer: View {
                 Toggle("Show in Fahrenheit", isOn: $store.fahrenheit)
                 Toggle("Open at Login", isOn: $store.launchAtLogin)
                 Divider()
+                if let updater = Updater.shared {
+                    UpdateMenuItems(updater: updater)
+                    Divider()
+                }
                 Button("Remove Fan Helper…") { store.removeFanHelper() }
             } label: {
                 Image(systemName: "gearshape")
@@ -826,5 +830,16 @@ struct Footer: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 6)
         .padding(.top, 2)
+    }
+}
+
+struct UpdateMenuItems: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        Button("Check for Updates…") { updater.checkForUpdates() }
+            .disabled(!updater.canCheck)
+        Toggle("Check for Updates Automatically", isOn: Binding(get: { updater.checksAutomatically },
+                                                               set: { updater.checksAutomatically = $0 }))
     }
 }

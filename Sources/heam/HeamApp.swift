@@ -4,6 +4,10 @@ import SwiftUI
 struct HeamApp: App {
     @StateObject private var store = Store()
 
+    init() {
+        _ = Updater.shared // start Sparkle's scheduled checks at launch
+    }
+
     var body: some Scene {
         MenuBarExtra {
             PopoverView(store: store)
