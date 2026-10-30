@@ -55,6 +55,20 @@ final class Store: ObservableObject {
         var id: String { rawValue }
     }
 
+    enum Theme: String, CaseIterable, Identifiable {
+        case system = "System", light = "Light", dark = "Dark"
+        var id: String { rawValue }
+
+        /// Applied app-wide, so the popover, alerts and the update window all follow it.
+        @MainActor func apply() {
+            switch self {
+            case .system: NSApp?.appearance = nil
+            case .light: NSApp?.appearance = NSAppearance(named: .aqua)
+            case .dark: NSApp?.appearance = NSAppearance(named: .darkAqua)
+            }
+        }
+    }
+
     enum MenuBarItem: String, CaseIterable, Identifiable {
         case temperature = "Temperature"
         case chip = "Chip Temperature"
@@ -71,6 +85,7 @@ final class Store: ObservableObject {
     @Published private(set) var baseline: Double
     @Published private(set) var thermalState = ProcessInfo.processInfo.thermalState
     @Published private(set) var systemWatts: Double?
+    @Published private(set) var battery: BatteryInfo?
     @Published private(set) var today = DailyHistory.load()
     /// The popover only renders while open; a hidden SwiftUI tree still re-lays out on every update.
     @Published var popoverVisible = false {
@@ -80,6 +95,12 @@ final class Store: ObservableObject {
     @Published var reading: Reading { didSet { save(reading.rawValue, "reading") } }
     @Published var fahrenheit: Bool { didSet { save(fahrenheit, "fahrenheit") } }
     @Published var menuBarItem: MenuBarItem { didSet { save(menuBarItem.rawValue, "menuBarItem") } }
+    @Published var theme: Theme {
+        didSet {
+            save(theme.rawValue, "theme")
+            theme.apply()
+        }
+    }
 
     @Published private(set) var fanMode: FanMode = .auto
     @Published var fanTargets: [Double] = []
@@ -109,6 +130,7 @@ final class Store: ObservableObject {
         reading = Reading(rawValue: defaults.string(forKey: "reading") ?? "") ?? .average
         fahrenheit = defaults.bool(forKey: "fahrenheit")
         menuBarItem = MenuBarItem(rawValue: defaults.string(forKey: "menuBarItem") ?? "") ?? .temperature
+        theme = Theme(rawValue: defaults.string(forKey: "theme") ?? "") ?? .system
         baseline = defaults.object(forKey: "idleBaseline") as? Double ?? 35
         curveStart = defaults.object(forKey: "curveStart") as? Double ?? 65
         curveFull = defaults.object(forKey: "curveFull") as? Double ?? 95
@@ -116,6 +138,7 @@ final class Store: ObservableObject {
         if let last = Snapshot.load(), Date().timeIntervalSince(last.date) < 300 {
             history = Array(last.history.suffix(Self.historyLength))
         }
+        DispatchQueue.main.async { [theme] in theme.apply() } // NSApp exists once the app has launched
         tick()
         timer = Timer.scheduledTimer(withTimeInterval: Self.interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
@@ -189,7 +212,11 @@ final class Store: ObservableObject {
             let shares = monitor.sample()
             let fans = Fans.read()
             let watts = SMC.number("PSTR")
-            Task { @MainActor in self.apply(sensors: sensors, shares: shares, fans: fans, watts: watts) }
+            let battery = BatteryInfo.read()
+            Task { @MainActor in
+                if self.battery != battery { self.battery = battery }
+                self.apply(sensors: sensors, shares: shares, fans: fans, watts: watts)
+            }
         }
         ticks += 1
     }
@@ -271,6 +298,9 @@ final class Store: ObservableObject {
         baseline = 38
         thermalState = .nominal
         fans = [Fan(index: 0, rpm: 3120, minRPM: 2317, maxRPM: 6550)]
+        battery = BatteryInfo(percent: 82, cycles: 143, ratedCycles: 1000, designCapacity: 6249, fullCapacity: 5880,
+                              isCharging: true, onPower: true, fullyCharged: false, watts: 31.2,
+                              minutesRemaining: 38, adapterWatts: 96)
         fanTargets = [3120]
         let headroom = avg - baseline
         let demo: [(String, String, Double, Double)] = [

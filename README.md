@@ -36,6 +36,8 @@
 
 **Every sensor, grouped.** 40+ sensors on Apple Silicon, bucketed into Chip, Board, SSD and Battery. Click a tile for the full list.
 
+**Battery details.** Click the Battery tile for charge, health, cycle count, capacity, charging or drain power, time left and charger wattage.
+
 **Real power draw.** Whole-system watts from the SMC, and per-app watts from the kernel's CPU energy counters plus each app's slice of GPU energy.
 
 **Fan control.** Auto, a temperature **curve** (fans ramp between two temperatures you pick, and macOS takes over below the ramp), or **manual** RPM with Quiet, Balanced and Max presets.
@@ -46,12 +48,15 @@
 
 **Widget.** Temperature, power and the top heat sources on your desktop or in Notification Center.
 
+**Light or dark.** Follow the system, or pin heam to light or dark in the gear menu.
+
 **Updates itself.** heam checks for new versions once a day and installs them in a click, using [Sparkle](https://sparkle-project.org). Every update is signed, and heam refuses any update whose signature doesn't match.
 
 **Light on resources.** About 1–2% CPU and 20–40 MB of memory with the popover closed.
 
 <p align="center">
   <img src="docs/today.png" width="360" alt="The Today view: average heat each app added today">
+  <img src="docs/battery.png" width="290" alt="Battery details: charge, health, cycles, capacity, charging power and charger wattage">
 </p>
 
 ## Install

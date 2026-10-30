@@ -270,9 +270,17 @@ struct SensorTiles: View {
                     open = group.name
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Image(systemName: group.symbol)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Image(systemName: group.name == "Battery" ? batterySymbol : group.symbol)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                            if group.name == "Battery", let battery = store.battery {
+                                Spacer(minLength: 0)
+                                Text("\(battery.percent)%")
+                                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         Text(store.format(group.average))
                             .font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit())
                             .foregroundStyle(heatColor(group.average))
@@ -297,6 +305,21 @@ struct SensorTiles: View {
     }
 }
 
+extension SensorTiles {
+    /// The battery glyph fills with the real charge and shows a bolt while charging.
+    var batterySymbol: String {
+        guard let b = store.battery else { return "battery.75percent" }
+        if b.isCharging { return "battery.100percent.bolt" }
+        switch b.percent {
+        case ..<13: return "battery.0percent"
+        case ..<38: return "battery.25percent"
+        case ..<63: return "battery.50percent"
+        case ..<88: return "battery.75percent"
+        default: return "battery.100percent"
+        }
+    }
+}
+
 struct SensorList: View {
     @ObservedObject var store: Store
     let group: SensorGroup
@@ -305,8 +328,17 @@ struct SensorList: View {
         // Re-read the group so values stay live while the popover is open.
         let live = store.groups.first { $0.name == group.name } ?? group
         VStack(alignment: .leading, spacing: 8) {
+            if live.name == "Battery", let battery = store.battery {
+                BatteryDetails(battery: battery, temperature: store.format(live.average, decimals: 1))
+                Divider()
+            }
             HStack {
-                Label(live.name, systemImage: live.symbol).font(.system(size: 13, weight: .semibold))
+                if live.name == "Battery", store.battery != nil {
+                    // The details above already carry the title.
+                    Text("Sensors").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                } else {
+                    Label(live.name, systemImage: live.symbol).font(.system(size: 13, weight: .semibold))
+                }
                 Spacer()
                 Text("hottest \(store.format(live.hottest, decimals: 1))")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -328,7 +360,7 @@ struct SensorList: View {
             .frame(maxHeight: 220)
         }
         .padding(12)
-        .frame(width: 240)
+        .frame(width: 260)
     }
 }
 
@@ -817,6 +849,9 @@ struct Footer: View {
                         alerts.sendTest(chip: store.chip, impacts: store.impacts, format: { store.format($0) })
                     }
                 }
+                Picker("Appearance", selection: $store.theme) {
+                    ForEach(Store.Theme.allCases) { Text($0.rawValue).tag($0) }
+                }
                 Divider()
                 Toggle("Show in Fahrenheit", isOn: $store.fahrenheit)
                 Toggle("Open at Login", isOn: $store.launchAtLogin)
@@ -853,5 +888,71 @@ struct UpdateMenuItems: View {
             .disabled(!updater.canCheck)
         Toggle("Check for Updates Automatically", isOn: Binding(get: { updater.checksAutomatically },
                                                                set: { updater.checksAutomatically = $0 }))
+    }
+}
+
+struct BatteryDetails: View {
+    let battery: BatteryInfo
+    let temperature: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(battery.percent)%")
+                    .font(.system(size: 28, weight: .semibold, design: .rounded).monospacedDigit())
+                    .tracking(-0.5)
+                Text(status).font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            GeometryReader { geo in
+                Capsule().fill(Color.primary.opacity(0.08))
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(chargeColor.gradient)
+                            .frame(width: max(4, geo.size.width * Double(battery.percent) / 100))
+                    }
+            }
+            .frame(height: 5)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
+                if let health = battery.health {
+                    row("Health", String(format: "%.0f%%", health * 100) + (health < 0.8 ? ", service recommended" : ""),
+                        help: "How much charge the battery holds now compared with when it was new.")
+                }
+                row("Cycles", battery.ratedCycles.map { "\(battery.cycles) of \($0.formatted())" } ?? "\(battery.cycles)",
+                    help: "One cycle is using 100% of the battery's capacity, in one go or across several charges.")
+                if let full = battery.fullCapacity, let design = battery.designCapacity {
+                    row("Capacity", "\(full.formatted()) of \(design.formatted()) mAh")
+                }
+                row(battery.watts >= 0 ? "Charging" : "Drawing", String(format: "%.1f W", abs(battery.watts)))
+                if let adapter = battery.adapterWatts { row("Charger", "\(adapter) W") }
+                row("Temperature", temperature)
+            }
+            .font(.system(size: 11))
+        }
+    }
+
+    private var status: String {
+        let time = battery.minutesRemaining.map { m in m >= 60 ? "\(m / 60) h \(m % 60) min" : "\(m) min" }
+        if battery.fullyCharged { return "Fully charged" }
+        if battery.isCharging { return time.map { "Charging, \($0) to full" } ?? "Charging" }
+        if battery.onPower { return "On power, not charging" }
+        return time.map { "\($0) left" } ?? "On battery"
+    }
+
+    private var chargeColor: Color {
+        if battery.isCharging || battery.onPower { return .green }
+        switch battery.percent {
+        case ..<10: return .red
+        case ..<20: return .orange
+        default: return .green
+        }
+    }
+
+    private func row(_ label: String, _ value: String, help: String? = nil) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary)
+            Text(value).monospacedDigit()
+        }
+        .help(help ?? "")
     }
 }

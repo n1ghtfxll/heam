@@ -7,6 +7,12 @@ if let i = args.firstIndex(of: "--fan-daemon") {
 } else if args.contains("--dump") {
     // Debug aid: print what the app sees, then exit.
     for s in Sensors.read() { print(String(format: "%6.1f°  %@", s.celsius, s.name)) }
+    if let b = BatteryInfo.read() {
+        print("Battery: \(b.percent)%, health \(b.health.map { String(format: "%.0f%%", $0 * 100) } ?? "?"), "
+              + "\(b.cycles)/\(b.ratedCycles ?? 0) cycles, \(String(format: "%.1f", b.watts)) W, "
+              + "charging \(b.isCharging), on power \(b.onPower), \(b.minutesRemaining.map { "\($0) min" } ?? "-"), "
+              + "adapter \(b.adapterWatts.map { "\($0) W" } ?? "-")")
+    }
     for f in Fans.read() { print("\(f.name): \(Int(f.rpm)) rpm (\(Int(f.minRPM))–\(Int(f.maxRPM)))") }
     let g1 = GPUUsage.timeByPID()
     sleep(2)
@@ -56,6 +62,13 @@ if let i = args.firstIndex(of: "--fan-daemon") {
         write("now", ImpactModule(store: store, span: .now).padding(10).frame(width: 360))
         write("today", ImpactModule(store: store, span: .today).padding(10).frame(width: 360))
         write("curve", CurveEditor(store: store).padding(10).frame(width: 340))
+        if let battery = store.groups.first(where: { $0.name == "Battery" }) {
+            write("battery", SensorList(store: store, group: battery))
+            if let info = store.battery {
+                write("battery-details", BatteryDetails(battery: info, temperature: store.format(battery.average, decimals: 1))
+                    .padding(16).frame(width: 290))
+            }
+        }
         for mode in Store.FanMode.allCases {
             store.previewFanMode(mode)
             write("fans-\(mode.rawValue.lowercased())", FanModule(store: store).padding(10).frame(width: 360))
