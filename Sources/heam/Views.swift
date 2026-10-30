@@ -768,6 +768,7 @@ struct Footer: View {
         if snapshot {
             HStack {
                 Image(systemName: "gearshape")
+                versionLabel
                 Spacer()
                 Text("Quit heam")
             }
@@ -777,6 +778,16 @@ struct Footer: View {
             .padding(.top, 2)
         } else {
             menuRow
+        }
+    }
+
+    /// The running build's version, one step dimmer than the Quit button.
+    @ViewBuilder private var versionLabel: some View {
+        if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+            Text("v\(version)")
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .help("heam \(version)")
         }
     }
 
@@ -821,6 +832,7 @@ struct Footer: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            versionLabel
             Spacer()
             Button("Quit heam") { store.quit() }
                 .buttonStyle(.borderless)
