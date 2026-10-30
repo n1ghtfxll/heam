@@ -7,8 +7,8 @@
     <key>CFBundleIdentifier</key><string>is.bored.heam.widget</string>
     <key>CFBundleExecutable</key><string>HeamWidget</string>
     <key>CFBundlePackageType</key><string>XPC!</string>
-    <key>CFBundleShortVersionString</key><string>0.6.0</string>
-    <key>CFBundleVersion</key><string>7</string>
+    <key>CFBundleShortVersionString</key><string>0.6.1</string>
+    <key>CFBundleVersion</key><string>8</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>NSExtension</key>
     <dict>
