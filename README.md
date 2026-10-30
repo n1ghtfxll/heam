@@ -32,6 +32,8 @@
 
 **See what's heating your Mac.** heam measures each app's CPU *and* GPU energy and splits the degrees above your Mac's idle temperature between them, so games and video apps get the blame they deserve. Helper processes count toward their app, so Safari's web pages show up as Safari and Chrome helpers as Chrome.
 
+**Right-click any app** in the list to quit or force quit it, show it in Finder, or open Activity Monitor. System processes can't be quit from here.
+
 **Today view.** Which apps added the most heat over the day, with the day's peak temperatures and energy used.
 
 **Every sensor, grouped.** 40+ sensors on Apple Silicon, bucketed into Chip, Board, SSD and Battery. Click a tile for the full list.

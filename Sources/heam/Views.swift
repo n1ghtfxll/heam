@@ -392,6 +392,7 @@ struct ImpactModule: View {
                     if let row = rows[safe: i] {
                         ImpactRow(name: row.name, bundlePath: row.bundlePath, relative: row.relative,
                                   value: row.value, detail: row.detail, gpuHeavy: row.gpuHeavy)
+                            .contextMenu { RowMenu(store: store, name: row.name, bundlePath: row.bundlePath) }
                     } else {
                         Color.clear.frame(height: ImpactRow.height)
                     }
@@ -954,5 +955,41 @@ struct BatteryDetails: View {
             Text(value).monospacedDigit()
         }
         .help(help ?? "")
+    }
+}
+
+/// Right-click actions for a row in "Heating your Mac".
+struct RowMenu: View {
+    @ObservedObject var store: Store
+    let name: String
+    let bundlePath: String?
+
+    var body: some View {
+        let count = store.processCount(name: name)
+        let quittable = store.canQuit(name: name, bundlePath: bundlePath)
+        Text(count == 0 ? "Not running" : count == 1 ? "1 process" : "\(count) processes")
+        Divider()
+        Button("Quit \(name)") { store.quitProcesses(name: name, bundlePath: bundlePath, force: false) }
+            .disabled(!quittable)
+        Button("Force Quit \(name)…") { confirmForceQuit() }
+            .disabled(!quittable)
+        Divider()
+        Button("Show in Finder") { store.revealInFinder(name: name, bundlePath: bundlePath) }
+            .disabled(!store.canReveal(name: name, bundlePath: bundlePath))
+        Button("Open Activity Monitor") { store.openActivityMonitor() }
+    }
+
+    private func confirmForceQuit() {
+        let alert = NSAlert()
+        alert.messageText = "Force quit \(name)?"
+        alert.informativeText = "Any unsaved changes in \(name) will be lost."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Force Quit")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn {
+            store.quitProcesses(name: name, bundlePath: bundlePath, force: true)
+        }
     }
 }

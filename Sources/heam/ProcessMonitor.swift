@@ -23,6 +23,8 @@ final class ProcessMonitor: @unchecked Sendable {
     private var previousGPU: [pid_t: UInt64] = [:]
     private var labels: [pid_t: (name: String, bundle: String?)] = [:]
     private var lastSample: Date?
+    /// Every running process ID per row name, busy or not, so a row's actions reach all of them.
+    private(set) var pidsByName: [String: [pid_t]] = [:]
 
     func sample() -> [AppShare] {
         let capacity = Int(proc_listallpids(nil, 0)) + 64
@@ -84,6 +86,10 @@ final class ProcessMonitor: @unchecked Sendable {
             grouped[label.name, default: (label.bundle, 0, 0)].cpu += cpu
             grouped[label.name]!.gpu += gpu
         }
+        var pidMap: [String: [pid_t]] = [:]
+        for pid in current.keys { pidMap[label(for: pid).name, default: []].append(pid) }
+        pidsByName = pidMap
+
         let total = grouped.values.reduce(0) { $0 + $1.cpu + $1.gpu }
         guard total > 0 else { return [] }
         return grouped

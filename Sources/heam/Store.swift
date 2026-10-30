@@ -122,6 +122,7 @@ final class Store: ObservableObject {
     /// Smoothed per-app values so the list doesn't jitter between 2 s samples.
     private var smoothed: [String: (bundle: String?, share: Double, watts: Double?, gpu: Double)] = [:]
     private var smoothedChip: Double?
+    private var pidsByName: [String: [pid_t]] = [:]
     private var timer: Timer?
     private var ticks = 0
 
@@ -213,7 +214,9 @@ final class Store: ObservableObject {
             let fans = Fans.read()
             let watts = SMC.number("PSTR")
             let battery = BatteryInfo.read()
+            let pids = monitor.pidsByName
             Task { @MainActor in
+                self.pidsByName = pids
                 if self.battery != battery { self.battery = battery }
                 self.apply(sensors: sensors, shares: shares, fans: fans, watts: watts)
             }
@@ -433,5 +436,77 @@ final class Store: ObservableObject {
         // Always give control back to macOS on the way out.
         FanClient.send("auto")
         NSApp.terminate(nil)
+    }
+
+    // MARK: Row actions
+
+    /// Never quit from heam: these log you out, blank the screen, or aren't apps at all.
+    private static let protectedNames: Set<String> = [
+        "kernel_task", "Screen drawing", "WindowServer", "loginwindow", "launchd",
+        "SystemUIServer", "ControlCenter", "NotificationCenter", "Dock",
+    ]
+
+    func processCount(name: String) -> Int { pidsByName[name]?.count ?? 0 }
+
+    private func runningApps(bundlePath: String?) -> [NSRunningApplication] {
+        guard let bundlePath else { return [] }
+        let target = URL(fileURLWithPath: bundlePath).resolvingSymlinksInPath().path
+        return NSWorkspace.shared.runningApplications.filter {
+            $0.bundleURL?.resolvingSymlinksInPath().path == target
+        }
+    }
+
+    /// Only processes that belong to this user; the rest aren't ours to stop.
+    private func userPIDs(name: String) -> [pid_t] {
+        (pidsByName[name] ?? []).filter { pid in
+            var info = proc_bsdinfo()
+            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+            return proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size && info.pbi_uid == getuid()
+        }
+    }
+
+    private func isSelf(_ bundlePath: String?) -> Bool {
+        bundlePath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath() }
+            == Bundle.main.bundleURL.resolvingSymlinksInPath()
+    }
+
+    func canQuit(name: String, bundlePath: String?) -> Bool {
+        guard !Self.protectedNames.contains(name) else { return false }
+        return isSelf(bundlePath) || !runningApps(bundlePath: bundlePath).isEmpty || !userPIDs(name: name).isEmpty
+    }
+
+    func quitProcesses(name: String, bundlePath: String?, force: Bool) {
+        guard canQuit(name: name, bundlePath: bundlePath) else { return }
+        if isSelf(bundlePath) {
+            quit() // hands the fans back to macOS first
+            return
+        }
+        let apps = runningApps(bundlePath: bundlePath)
+        if !apps.isEmpty {
+            // Like ⌘Q or Force Quit from the Dock; the app's own helpers follow it.
+            apps.forEach { _ = force ? $0.forceTerminate() : $0.terminate() }
+        } else {
+            userPIDs(name: name).forEach { kill($0, force ? SIGKILL : SIGTERM) }
+        }
+    }
+
+    func revealInFinder(name: String, bundlePath: String?) {
+        if let bundlePath {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: bundlePath)])
+            return
+        }
+        guard let pid = pidsByName[name]?.first else { return }
+        var buf = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: String(cString: buf))])
+    }
+
+    func canReveal(name: String, bundlePath: String?) -> Bool {
+        bundlePath != nil || pidsByName[name]?.isEmpty == false
+    }
+
+    func openActivityMonitor() {
+        let url = URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")
+        NSWorkspace.shared.openApplication(at: url, configuration: .init())
     }
 }
